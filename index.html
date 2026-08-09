@@ -18,7 +18,11 @@
 <body>
     <header class="app-header">
         <h1>🎉 Kenia Silva_arte_festas</h1>
-        <button type="button" class="btn-tema" onclick="alternarTema()" title="Alternar Modo Escuro">🌙</button>
+        <div class="header-actions">
+            <!-- Novo botão de Clientes -->
+            <button type="button" class="btn-tema" onclick="abrirModalClientes()" title="Ver Clientes">👥</button>
+            <button type="button" class="btn-tema" onclick="alternarTema()" title="Alternar Modo Escuro">🌙</button>
+        </div>
     </header>
 
     <datalist id="lista-clientes-salvos"></datalist>
@@ -44,7 +48,6 @@
                         <span>📊 Faturamento Total</span>
                         <strong id="total-valor">R$ 0,00</strong>
                     </div>
-                    <!-- ITEM 3: Gastos Clicáveis -->
                     <div class="detalhe-item custo" onclick="abrirModalGastos()" style="cursor: pointer;" title="Clique para ver os detalhes">
                         <span>📉 Gastos (Clique p/ ver)</span>
                         <strong id="total-custos">R$ 0,00</strong>
@@ -52,7 +55,6 @@
                 </div>
             </section>
 
-            <!-- ITEM 4: Aba Inicial com Quem tem para Receber -->
             <section class="card painel-relatorio">
                 <h2 style="color: #d97706;">💸 Contas a Receber (Pendentes)</h2>
                 <div class="table-container">
@@ -65,9 +67,7 @@
                                 <th>Ação</th>
                             </tr>
                         </thead>
-                        <tbody id="lista-contas-receber">
-                            <!-- Injetado via JS -->
-                        </tbody>
+                        <tbody id="lista-contas-receber"></tbody>
                     </table>
                 </div>
             </section>
@@ -109,7 +109,7 @@
                 </div>
                 <div class="calendario-grid" id="calendario-dias"></div>
                 <div style="margin-top: 15px; font-size: 0.8rem; text-align: center; opacity: 0.8;">
-                    <span style="display:inline-block; width: 12px; height: 12px; background: #8b5cf6; border-radius: 50%; margin-right: 5px; vertical-align: middle;"></span> Com Eventos
+                    <span style="display:inline-block; width: 12px; height: 12px; background: #8b5cf6; border-radius: 50%; margin-right: 5px;"></span> Com Eventos
                     <br><br>
                     <i>Toque em qualquer dia para ver ou adicionar festas!</i>
                 </div>
@@ -160,10 +160,17 @@
             </section>
         </div>
 
-        <!-- ================= ABA 4: VENDER / EDITAR ================= -->
+        <!-- ================= ABA 4: VENDER / EDITAR (VISUAL PROFISSIONAL) ================= -->
         <div id="aba-pedido" class="conteudo-aba">
-            <section class="card card-vender">
-                <h2 id="titulo-vender">🛒 Nova Venda / Fechar Pedido</h2>
+            <div style="margin-bottom: 1rem; text-align: center;">
+                <h2 id="titulo-vender" style="color: #6b21a8;">🛒 PDV - Nova Venda</h2>
+                <p style="font-size: 0.85rem; color: #666;">Preencha os passos para fechar o contrato</p>
+            </div>
+
+            <!-- PASSO 1: DADOS -->
+            <div class="step-card">
+                <span class="step-badge">1</span>
+                <h3>Dados do Evento</h3>
                 <div class="input-group">
                     <input type="text" id="ped-cliente" list="lista-clientes-salvos" placeholder="Nome do Cliente">
                 </div>
@@ -183,10 +190,12 @@
                 <div class="input-group">
                     <textarea id="ped-obs" placeholder="Observações importantes..." rows="2"></textarea>
                 </div>
-            </section>
+            </div>
 
-            <section class="card card-vender">
-                <h2>🛒 Carrinho & Itens</h2>
+            <!-- PASSO 2: CARRINHO -->
+            <div class="step-card">
+                <span class="step-badge">2</span>
+                <h3>Produtos e Serviços</h3>
                 <div class="caixa-montar-combo">
                     <div class="form-linha" style="margin-bottom: 0;">
                         <div class="input-group" style="flex: 2; margin-bottom: 0;">
@@ -196,15 +205,16 @@
                     </div>
                 </div>
                 <ul id="lista-pedido-atual" class="lista-carrinho"></ul>
-                
                 <div class="input-group" style="margin-top: 1rem;">
                     <label>Taxa de Deslocamento / Frete (R$):</label>
                     <input type="number" id="ped-frete" step="0.01" placeholder="0,00" oninput="atualizarTelaPedido()">
                 </div>
-            </section>
+            </div>
 
-            <section class="card card-vender">
-                <h2>📉 Lista Detalhada de Gastos</h2>
+            <!-- PASSO 3: CUSTOS -->
+            <div class="step-card custo-card">
+                <span class="step-badge" style="background:#ef4444;">3</span>
+                <h3 style="color: #ef4444;">Custos Operacionais</h3>
                 <div class="form-linha">
                     <div class="input-group" style="flex: 2;">
                         <input type="text" id="gasto-nome" placeholder="Ex: Doces">
@@ -213,20 +223,23 @@
                         <input type="number" id="gasto-qtd" value="1" min="1" placeholder="Qtd">
                     </div>
                     <div class="input-group" style="flex: 1;">
-                        <input type="number" id="gasto-valor" step="0.01" placeholder="Valor Un.">
+                        <input type="number" id="gasto-valor" step="0.01" placeholder="R$ Un.">
                     </div>
                 </div>
                 <button type="button" onclick="adicionarGastoDetalhado()" class="btn-secundario">+ Adicionar Gasto</button>
                 <ul id="lista-gastos-detalhados" class="lista-temp" style="margin-top:0.8rem;"></ul>
-            </section>
+            </div>
 
-            <section class="resumo-checkout">
+            <!-- PASSO 4: FECHAMENTO -->
+            <div class="step-card checkout-card">
+                <span class="step-badge" style="background:#10b981;">4</span>
+                <h3>💳 Fechamento</h3>
                 <div class="linha-resumo">
                     <span>Subtotal + Frete:</span>
                     <strong id="ped-total-display">R$ 0,00</strong>
                 </div>
                 <div class="linha-resumo destaque-sinal">
-                    <span>Sinal / Adiantamento (R$):</span>
+                    <span>Sinal (50% Sugerido):</span>
                     <input type="number" id="ped-antecipacao" step="0.01" placeholder="0,00" oninput="calcularRestantePedido()">
                 </div>
                 <div class="linha-resumo total-final">
@@ -238,7 +251,7 @@
                     <button type="button" onclick="gerarWhatsApp()" class="btn-whatsapp">📲 Enviar Orçamento</button>
                     <button type="button" id="btn-fechar-pedido" onclick="fecharPedido()" class="btn-sucesso">💰 Salvar Pedido</button>
                 </div>
-            </section>
+            </div>
         </div>
 
         <!-- ================= ABA 5: HISTÓRICO ================= -->
@@ -267,6 +280,15 @@
             </section>
         </div>
     </main>
+
+    <!-- MODAL DE CLIENTES (NOVO) -->
+    <div id="modal-clientes" class="modal-overlay">
+        <div class="modal-content" style="max-height: 85vh; overflow-y: auto;">
+            <h2 style="color: #6b21a8; margin-bottom: 1rem;">👥 Meus Clientes</h2>
+            <ul id="lista-clientes-modal" class="lista-carrinho"></ul>
+            <button type="button" class="btn-remover" onclick="fecharModalClientes()" style="width: 100%; margin-top: 1rem;">Fechar</button>
+        </div>
+    </div>
 
     <!-- MODAL POP-UP DOS GASTOS DA TELA INICIAL -->
     <div id="modal-gastos" class="modal-overlay">

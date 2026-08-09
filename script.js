@@ -1,18 +1,19 @@
-let festas = JSON.parse(localStorage.getItem('festasAgendadas')) || [];
-let catalogoServicos = JSON.parse(localStorage.getItem('catalogoServicos')) || [];
-let catalogoCombos = JSON.parse(localStorage.getItem('catalogoCombos')) || [];
-let clientesSalvos = JSON.parse(localStorage.getItem('clientesSalvos')) || []; 
+let festas = JSON.parse(localStorage.getItem('festas_kenia_v1')) || [];
+let catalogoServicos = JSON.parse(localStorage.getItem('serv_kenia_v1')) || [];
+let catalogoCombos = JSON.parse(localStorage.getItem('combos_kenia_v1')) || [];
+let clientesSalvos = JSON.parse(localStorage.getItem('cli_kenia_v1')) || []; 
 
 let comboTempItens = [];
 let pedidoAtualItens = [];
+let gastosDetalhadosTemp = []; 
+let editIndex = null; // Variável para rastrear se estamos editando uma festa
 
 let dataAtual = new Date();
 let mesAtual = dataAtual.getMonth();
 let anoAtual = dataAtual.getFullYear();
 let chartInstance = null;
-let indexChecklistAtual = null;
 
-function formatarMoeda(valor) { return Number(valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+function formatarMoeda(valor) { return Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function formatarDataCurta(data) { const p = data.split('-'); return p.length === 3 ? `${p[2]}/${p[1]}` : data; } 
 function formatarDataCompleta(data) { const p = data.split('-'); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : data; } 
 
@@ -23,6 +24,15 @@ function mudarAba(idAba, idBotao) {
     document.getElementById(idBotao).classList.add('ativo');
     window.scrollTo(0, 0); 
     if(idAba === 'aba-agenda') renderizarCalendario(); 
+    if(idAba === 'aba-historico') renderizarHistorico();
+    
+    // Resetar edição se sair da aba pedido antes de fechar
+    if(idAba !== 'aba-pedido' && editIndex !== null) {
+        editIndex = null;
+        limparFormularioVenda();
+        document.getElementById('titulo-vender').innerText = '🛒 Nova Venda / Fechar Pedido';
+        document.getElementById('btn-fechar-pedido').innerText = '💰 Fechar Pedido';
+    }
 }
 
 function alternarTema() {
@@ -36,78 +46,152 @@ function atualizarListaClientes() {
     datalist.innerHTML = '';
     clientesSalvos.forEach(cliente => { datalist.innerHTML += `<option value="${cliente}">`; });
 }
+
 function salvarNovoCliente(nome) {
     if (!nome) return;
     if (!clientesSalvos.includes(nome)) {
         clientesSalvos.push(nome);
-        localStorage.setItem('clientesSalvos', JSON.stringify(clientesSalvos));
+        localStorage.setItem('cli_kenia_v1', JSON.stringify(clientesSalvos));
         atualizarListaClientes();
     }
 }
 
-function exportarBackup() {
-    const dados = { festas, catalogoServicos, catalogoCombos, clientesSalvos };
-    const blob = new Blob([JSON.stringify(dados)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url;
-    a.download = `Backup_FestasPRO_${new Date().toISOString().split('T')[0]}.json`;
-    a.click(); URL.revokeObjectURL(url);
+// ==========================================
+// 1. EDIÇÃO DE FESTAS 
+// ==========================================
+function editarFesta(index) {
+    editIndex = index;
+    const f = festas[index];
+    
+    document.getElementById('ped-cliente').value = f.cliente;
+    document.getElementById('ped-data').value = f.data;
+    document.getElementById('ped-horario').value = f.horario || '';
+    document.getElementById('ped-endereco').value = f.endereco || '';
+    document.getElementById('ped-obs').value = f.obs || '';
+    document.getElementById('ped-antecipacao').value = f.antecipacao > 0 ? f.antecipacao : '';
+
+    // Extrair o frete se existir para não ficar duplicado na lista
+    let freteVal = 0;
+    pedidoAtualItens = f.itens.filter(i => {
+        if(i.nome === 'Deslocamento/Frete' || i.nome === 'Taxa de Deslocamento / Frete') {
+            freteVal = i.valor;
+            return false;
+        }
+        return true;
+    });
+    document.getElementById('ped-frete').value = freteVal > 0 ? freteVal : '';
+    
+    gastosDetalhadosTemp = f.gastos ? [...f.gastos] : [];
+    
+    renderizarGastosTemp();
+    atualizarTelaPedido();
+    
+    document.getElementById('titulo-vender').innerText = `✏️ Editando Festa: ${f.cliente}`;
+    document.getElementById('btn-fechar-pedido').innerText = '💾 Atualizar Pedido';
+    mudarAba('aba-pedido', 'btn-tab-pedido');
 }
 
-function importarBackup(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            const dados = JSON.parse(e.target.result);
-            if(dados.festas) localStorage.setItem('festasAgendadas', JSON.stringify(dados.festas));
-            if(dados.catalogoServicos) localStorage.setItem('catalogoServicos', JSON.stringify(dados.catalogoServicos));
-            if(dados.catalogoCombos) localStorage.setItem('catalogoCombos', JSON.stringify(dados.catalogoCombos));
-            if(dados.clientesSalvos) localStorage.setItem('clientesSalvos', JSON.stringify(dados.clientesSalvos));
-            alert('✅ Backup Restaurado com Sucesso!'); location.reload();
-        } catch (error) { alert('❌ Erro no arquivo.'); }
-    };
-    reader.readAsText(file);
+// ==========================================
+// 2. GASTOS E LUCROS (MÓDULOS)
+// ==========================================
+function adicionarGastoDetalhado() {
+    const nome = document.getElementById('gasto-nome').value;
+    const qtd = parseFloat(document.getElementById('gasto-qtd').value) || 1;
+    const valor = parseFloat(document.getElementById('gasto-valor').value) || 0;
+    if(!nome || valor <= 0) return alert('Preencha o nome do gasto e valor!');
+    
+    gastosDetalhadosTemp.push({ nome, qtd, valor, total: qtd * valor });
+    document.getElementById('gasto-nome').value = '';
+    document.getElementById('gasto-qtd').value = '1';
+    document.getElementById('gasto-valor').value = '';
+    renderizarGastosTemp();
 }
 
-// Visão Geral com Filtro de Período
+function renderizarGastosTemp() {
+    const ul = document.getElementById('lista-gastos-detalhados');
+    ul.innerHTML = '';
+    gastosDetalhadosTemp.forEach((g, idx) => {
+        ul.innerHTML += `<li><span>${g.qtd}x ${g.nome} = <strong>${formatarMoeda(g.total)}</strong></span> <button class="btn-remover" onclick="gastosDetalhadosTemp.splice(${idx},1); renderizarGastosTemp();">X</button></li>`;
+    });
+}
+
+function abrirModalGastos() {
+    const inputMes = document.getElementById('filtro-mes-relatorio').value;
+    const ul = document.getElementById('lista-gastos-modal');
+    ul.innerHTML = '';
+    let total = 0;
+
+    festas.forEach(f => {
+        if(f.data && f.data.startsWith(inputMes) && f.gastos && f.gastos.length > 0) {
+            ul.innerHTML += `<li style="background:#e9d5ff; font-weight:bold; justify-content:center; color:#581c87; border-radius: 4px; padding: 0.5rem; margin-top: 10px;">${f.cliente} - ${formatarDataCurta(f.data)}</li>`;
+            f.gastos.forEach(g => {
+                ul.innerHTML += `<li style="padding: 0.5rem; border-bottom: 1px solid #f3f4f6;"><span>${g.qtd}x ${g.nome}</span> <strong>${formatarMoeda(g.total)}</strong></li>`;
+                total += g.total;
+            });
+        }
+    });
+
+    if(total === 0) {
+        ul.innerHTML = '<li style="padding: 1rem; text-align: center;">Nenhum gasto registrado neste mês.</li>';
+    } else {
+        ul.innerHTML += `<li style="background:#fecdd3; color:#e11d48; justify-content:space-between; padding: 1rem; margin-top: 10px; border-radius: 8px;"><strong>Total Gasto:</strong> <strong>${formatarMoeda(total)}</strong></li>`;
+    }
+    
+    document.getElementById('modal-gastos').style.display = 'flex';
+}
+function fecharModalGastos() { document.getElementById('modal-gastos').style.display = 'none'; }
+
+
+// ==========================================
+// 3. VISÃO GERAL, RELATÓRIO E CONTAS A RECEBER
+// ==========================================
 function atualizarVisaoGeral() {
     let totalPendente = 0, totalFaturamento = 0, totalCustos = 0, totalRecebido = 0;
     const lista = document.getElementById('lista-festas');
+    const listaReceber = document.getElementById('lista-contas-receber');
     lista.innerHTML = '';
+    listaReceber.innerHTML = '';
     let dadosMensais = {};
 
-    const filtroPeriodo = document.getElementById('filtro-periodo').value;
-    const hoje = new Date();
+    const inputMes = document.getElementById('filtro-mes-relatorio');
+    if (!inputMes.value) {
+        const now = new Date();
+        inputMes.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+    const mesSelecionado = inputMes.value; 
+    let fatMes = 0, custoMes = 0, qtdFestasMes = 0;
 
     festas.sort((a, b) => new Date(a.data) - new Date(b.data)).forEach((festa, index) => {
         const valorTotal = Number(festa.valor || 0);
         const custo = Number(festa.custo || 0);
         const antecipacao = Number(festa.antecipacao || 0);
         
-        // Se for lead/orçamento aberto, não soma no faturamento geral se preferir, ou soma se fechado. Vamos somar apenas se for confirmado ou considerar tudo:
-        if (festa.status !== 'Orçamento') {
-            totalFaturamento += valorTotal;
-            totalCustos += custo;
-            if (festa.status === 'Pago') {
-                totalRecebido += valorTotal;
-            } else {
-                totalRecebido += antecipacao;
-                totalPendente += (valorTotal - antecipacao); 
+        totalFaturamento += valorTotal;
+        totalCustos += custo;
+        
+        if (festa.status === 'Pago') {
+            totalRecebido += valorTotal;
+        } else {
+            totalRecebido += antecipacao;
+            const falta = valorTotal - antecipacao;
+            totalPendente += falta;
+            
+            // Popula lista de contas a receber
+            if(falta > 0) {
+                listaReceber.innerHTML += `
+                <tr>
+                    <td>${formatarDataCurta(festa.data)}</td>
+                    <td><strong>${festa.cliente}</strong></td>
+                    <td style="color:#ef4444; font-weight:bold;">${formatarMoeda(falta)}</td>
+                    <td><button class="btn-sucesso" onclick="quitarFesta(${index})" style="padding:0.4rem; font-size:0.75rem;">Dar Baixa</button></td>
+                </tr>`;
             }
         }
 
-        // Filtro de período (Semana / Mês)
-        if (festa.data) {
-            const dataFesta = new Date(festa.data + 'T00:00:00');
-            if (filtroPeriodo === 'semana') {
-                const umDia = 24 * 60 * 60 * 1000;
-                const diffDias = (dataFesta - hoje) / umDia;
-                if (diffDias < 0 || diffDias > 7) return; // Pula se estiver fora da semana
-            } else if (filtroPeriodo === 'mes') {
-                if (dataFesta.getMonth() !== hoje.getMonth() || dataFesta.getFullYear() !== hoje.getFullYear()) return; // Pula se estiver fora do mês
-            }
+        if (festa.data && festa.data.startsWith(mesSelecionado)) {
+            fatMes += valorTotal;
+            custoMes += custo;
+            qtdFestasMes++;
         }
 
         const mesAnoFesta = festa.data ? festa.data.substring(0, 7) : 'Sem Data';
@@ -115,25 +199,21 @@ function atualizarVisaoGeral() {
         dadosMensais[mesAnoFesta].faturamento += valorTotal;
         dadosMensais[mesAnoFesta].lucro += (valorTotal - custo);
 
-        let classeStatus = 'status-pendente';
-        let statusDisplay = festa.status;
-        if (festa.status === 'Pago') classeStatus = 'status-pago';
-        else if (festa.status === 'Orçamento') classeStatus = 'status-lead';
+        const classeStatus = festa.status === 'Pago' ? 'status-pago' : 'status-pendente';
 
         lista.innerHTML += `
             <tr>
                 <td>${formatarDataCurta(festa.data)}</td>
                 <td><strong>${festa.cliente}</strong></td>
-                <td><span class="${classeStatus}" onclick="alternarStatus(${index})" style="cursor:pointer;">${statusDisplay}</span></td>
+                <td><span class="${classeStatus}" onclick="alternarStatus(${index})" style="cursor:pointer;">${festa.status}</span></td>
                 <td>
-                    <div style="display: flex;">
-                        <button class="btn-check" onclick="abrirChecklist(${index})">✅</button>
-                        <button class="btn-pdf" onclick="gerarPDF(${index})">📄</button>
-                        <button class="btn-remover" onclick="excluirFesta(${index})">X</button>
-                    </div>
+                    <button class="btn-editar" onclick="editarFesta(${index})" title="Editar">✏️</button>
+                    <button class="btn-remover" onclick="excluirFesta(${index})">X</button>
                 </td>
             </tr>`;
     });
+    
+    if(listaReceber.innerHTML === '') listaReceber.innerHTML = '<tr><td colspan="4" style="text-align:center;">Nenhuma conta pendente.</td></tr>';
 
     document.getElementById('total-valor').textContent = formatarMoeda(totalFaturamento);
     document.getElementById('total-custos').textContent = formatarMoeda(totalCustos);
@@ -141,8 +221,28 @@ function atualizarVisaoGeral() {
     document.getElementById('total-recebido').textContent = formatarMoeda(totalRecebido);
     document.getElementById('total-pendente').textContent = formatarMoeda(totalPendente);
 
+    const lucroMes = fatMes - custoMes;
+    let notificacao = qtdFestasMes === 0 ? '⚠️ Nenhuma festa neste mês.' : `✨ Você tem ${qtdFestasMes} evento(s).`;
+    
+    document.getElementById('texto-relatorio-mensal').innerHTML = `
+        <strong>Resumo de ${mesSelecionado.split('-').reverse().join('/')}:</strong><br>
+        • Faturado: <b>${formatarMoeda(fatMes)}</b><br>
+        • Gastos: <b style="color:#ef4444">${formatarMoeda(custoMes)}</b><br>
+        • Lucro Líquido: <b style="color:#059669">${formatarMoeda(lucroMes)}</b><br>
+        <span style="color:#7c3aed; display:block; margin-top:4px;"><b>Aviso:</b> ${notificacao}</span>
+    `;
+
     renderizarCalendario();
     renderizarGrafico(dadosMensais);
+}
+
+function quitarFesta(index) {
+    if(confirm(`Confirmar o recebimento total e dar baixa na festa de ${festas[index].cliente}?`)){
+        festas[index].antecipacao = festas[index].valor;
+        festas[index].status = 'Pago';
+        localStorage.setItem('festas_kenia_v1', JSON.stringify(festas));
+        atualizarVisaoGeral(); renderizarHistorico();
+    }
 }
 
 function renderizarGrafico(dadosMensais) {
@@ -150,11 +250,7 @@ function renderizarGrafico(dadosMensais) {
     const labels = Object.keys(dadosMensais).sort();
     const dataFaturamento = labels.map(m => dadosMensais[m].faturamento);
     const dataLucro = labels.map(m => dadosMensais[m].lucro);
-
-    const labelsAmigaveis = labels.map(l => {
-        if(l === 'Sem Data') return l;
-        const [ano, mes] = l.split('-'); return `${mes}/${ano}`;
-    });
+    const labelsAmigaveis = labels.map(l => l === 'Sem Data' ? l : `${l.split('-')[1]}/${l.split('-')[0]}`);
 
     if(chartInstance) chartInstance.destroy();
     chartInstance = new Chart(ctx, {
@@ -163,119 +259,149 @@ function renderizarGrafico(dadosMensais) {
             labels: labelsAmigaveis,
             datasets: [
                 { label: 'Faturamento', data: dataFaturamento, backgroundColor: '#3b82f6', borderRadius: 4 },
-                { label: 'Lucro Líquido', data: dataLucro, backgroundColor: '#10b981', borderRadius: 4 }
+                { label: 'Lucro', data: dataLucro, backgroundColor: '#10b981', borderRadius: 4 }
             ]
         },
-        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+        options: { responsive: true, maintainAspectRatio: false }
     });
+}
+
+function alternarStatus(index) {
+    festas[index].status = festas[index].status === 'Pendente' ? 'Pago' : 'Pendente';
+    localStorage.setItem('festas_kenia_v1', JSON.stringify(festas)); 
+    atualizarVisaoGeral(); renderizarHistorico();
 }
 
 function excluirFesta(index) {
-    if(confirm('Excluir este registro?')) { festas.splice(index, 1); localStorage.setItem('festasAgendadas', JSON.stringify(festas)); atualizarVisaoGeral(); }
-}
-function alternarStatus(index) {
-    const atual = festas[index].status;
-    if (atual === 'Orçamento') festas[index].status = 'Pendente';
-    else if (atual === 'Pendente') festas[index].status = 'Pago';
-    else festas[index].status = 'Orçamento';
-    localStorage.setItem('festasAgendadas', JSON.stringify(festas)); atualizarVisaoGeral();
+    if(confirm('Tem certeza que deseja excluir?')) { 
+        festas.splice(index, 1); 
+        localStorage.setItem('festas_kenia_v1', JSON.stringify(festas)); 
+        atualizarVisaoGeral(); renderizarHistorico(); 
+    }
 }
 
-// Checklist
-function abrirChecklist(index) {
-    indexChecklistAtual = index;
-    const festa = festas[index];
-    if (!festa.tarefas) festa.tarefas = [];
-    document.getElementById('checklist-cliente-nome').textContent = `Cliente: ${festa.cliente}`;
-    document.getElementById('modal-checklist').style.display = 'flex';
-    renderizarTarefas();
-}
-function fecharModalChecklist() { document.getElementById('modal-checklist').style.display = 'none'; localStorage.setItem('festasAgendadas', JSON.stringify(festas)); }
-function renderizarTarefas() {
-    const ul = document.getElementById('lista-tarefas'); ul.innerHTML = '';
-    festas[indexChecklistAtual].tarefas.forEach((tarefa, idx) => {
-        ul.innerHTML += `
-            <li class="tarefa-item ${tarefa.concluida ? 'tarefa-feita' : ''}">
-                <div><input type="checkbox" style="margin-right:8px" ${tarefa.concluida ? 'checked' : ''} onchange="alternarTarefa(${idx})"><span>${tarefa.nome}</span></div>
-                <button class="btn-remover" onclick="removerTarefa(${idx})">X</button>
-            </li>`;
+// ==========================================
+// 4. HISTÓRICO
+// ==========================================
+function renderizarHistorico() {
+    const tbody = document.getElementById('lista-historico');
+    tbody.innerHTML = '';
+    
+    festas.sort((a, b) => new Date(b.data) - new Date(a.data)).forEach((festa, index) => {
+        const classeStatus = festa.status === 'Pago' ? 'status-pago' : 'status-pendente';
+        tbody.innerHTML += `
+            <tr>
+                <td>${formatarDataCurta(festa.data)}</td>
+                <td><strong>${festa.cliente}</strong></td>
+                <td><span class="${classeStatus}" onclick="alternarStatus(${index})" style="cursor:pointer;">${festa.status}</span></td>
+                <td>
+                    <button class="btn-editar" onclick="editarFesta(${index})" title="Editar">✏️</button>
+                    <button class="btn-pdf" onclick="abrirDetalhesFesta(${index})" title="Ver Relatório">📄</button>
+                </td>
+            </tr>`;
     });
 }
-function adicionarTarefa() {
-    const input = document.getElementById('nova-tarefa-nome'); if(!input.value) return;
-    festas[indexChecklistAtual].tarefas.push({ nome: input.value, concluida: false }); input.value = ''; renderizarTarefas();
-}
-function alternarTarefa(idx) { festas[indexChecklistAtual].tarefas[idx].concluida = !festas[indexChecklistAtual].tarefas[idx].concluida; renderizarTarefas(); }
-function removerTarefa(idx) { festas[indexChecklistAtual].tarefas.splice(idx, 1); renderizarTarefas(); }
 
-// Calendário
+function abrirDetalhesFesta(index) {
+    const f = festas[index];
+    const lucro = f.valor - f.custo;
+    
+    let htmlItens = f.itens && f.itens.length > 0 ? f.itens.map(i => `<li>- ${i.nome}: ${formatarMoeda(i.valor)}</li>`).join('') : '<li>Nenhum item registrado.</li>';
+    let htmlGastos = f.gastos && f.gastos.length > 0 ? f.gastos.map(g => `<li>- ${g.qtd}x ${g.nome}: <span style="color:#ef4444">${formatarMoeda(g.total)}</span></li>`).join('') : '<li>Nenhum gasto registrado.</li>';
+
+    document.getElementById('detalhes-festa-conteudo').innerHTML = `
+        <p><strong>👤 Cliente:</strong> ${f.cliente}</p>
+        <p><strong>📅 Data e Hora:</strong> ${formatarDataCompleta(f.data)} às ${f.horario || 'Não definido'}</p>
+        <p><strong>📍 Local:</strong> ${f.endereco || 'Não definido'}</p>
+        <p><strong>📝 Obs:</strong> ${f.obs || 'Nenhuma'}</p>
+        <hr style="margin: 10px 0; border: 0; border-top: 1px dashed #d8b4fe;">
+        <h3 style="color:#2563eb; font-size:1rem;">🛒 Itens Vendidos</h3>
+        <ul style="list-style:none; margin-bottom:10px;">${htmlItens}</ul>
+        <h3 style="color:#ef4444; font-size:1rem;">📉 Gastos da Festa</h3>
+        <ul style="list-style:none; margin-bottom:10px;">${htmlGastos}</ul>
+        <hr style="margin: 10px 0; border: 0; border-top: 1px dashed #d8b4fe;">
+        <p><strong>💰 Faturamento:</strong> ${formatarMoeda(f.valor)}</p>
+        <p><strong>💳 Adiantamento Pago:</strong> ${formatarMoeda(f.antecipacao)}</p>
+        <p><strong>💸 Custo Total:</strong> <span style="color:#ef4444">${formatarMoeda(f.custo)}</span></p>
+        <p style="font-size: 1.1rem; margin-top: 5px;"><strong>✨ Lucro Limpo:</strong> <span style="color:#059669">${formatarMoeda(lucro)}</span></p>
+    `;
+    document.getElementById('modal-detalhes-festa').style.display = 'flex';
+}
+function fecharModalDetalhes() { document.getElementById('modal-detalhes-festa').style.display = 'none'; }
+
+
+// ==========================================
+// 5. CALENDÁRIO
+// ==========================================
 function renderizarCalendario() {
     document.getElementById('mes-ano-display').textContent = `${['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'][mesAtual]} ${anoAtual}`;
     const grid = document.getElementById('calendario-dias'); grid.innerHTML = '';
     ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].forEach(d => grid.innerHTML += `<div class="dia-semana">${d}</div>`);
     
     for (let i = 0; i < new Date(anoAtual, mesAtual, 1).getDay(); i++) grid.innerHTML += `<div class="dia vazio"></div>`;
+    
     for (let i = 1; i <= new Date(anoAtual, mesAtual + 1, 0).getDate(); i++) {
         const dataFormatada = `${anoAtual}-${String(mesAtual + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-        const festa = festas.find(f => f.data === dataFormatada);
-        if (festa) {
-            let classeDia = 'dia-festa';
-            if (festa.status === 'Pago') classeDia = 'dia-festa-pago';
-            else if (festa.status === 'Orçamento') classeDia = 'dia-lead';
-            grid.innerHTML += `<div class="dia ${classeDia}" onclick="alert('Festa: ${festa.cliente}\\nStatus: ${festa.status}\\nTotal: ${formatarMoeda(festa.valor)}')">${i}</div>`;
+        const festasDoDia = festas.filter(f => f.data === dataFormatada);
+        
+        if (festasDoDia.length > 0) {
+            grid.innerHTML += `<div class="dia dia-com-festa" onclick="abrirModalDia('${dataFormatada}')">${i} <br><small>(${festasDoDia.length})</small></div>`;
         } else {
-            grid.innerHTML += `<div class="dia" onclick="abrirModalAgendamento('${dataFormatada}')">${i}</div>`;
+            grid.innerHTML += `<div class="dia" onclick="abrirModalDia('${dataFormatada}')">${i}</div>`;
         }
     }
 }
 function mudarMes(d) { mesAtual += d; if (mesAtual < 0) { mesAtual = 11; anoAtual--; } else if (mesAtual > 11) { mesAtual = 0; anoAtual++; } renderizarCalendario(); }
 
-function abrirModalAgendamento(data) {
-    document.getElementById('modal-data').value = data; document.getElementById('modal-data-titulo').textContent = `Agendar: ${formatarDataCompleta(data)}`;
-    document.getElementById('modal-agendamento').style.display = 'flex';
-}
-function fecharModalAgendamento() { document.getElementById('modal-agendamento').style.display = 'none'; document.getElementById('modal-cliente').value = ''; document.getElementById('modal-valor').value = ''; document.getElementById('modal-antecipacao').value = ''; document.getElementById('modal-custo').value = ''; }
+function abrirModalDia(data) {
+    document.getElementById('modal-data').value = data;
+    document.getElementById('modal-dia-titulo').textContent = `Eventos em: ${formatarDataCompleta(data)}`;
+    
+    const festasDoDia = festas.filter(f => f.data === data);
+    const container = document.getElementById('container-festas-do-dia');
+    container.innerHTML = '';
 
-function salvarAgendamentoRapido() {
-    const data = document.getElementById('modal-data').value, cliente = document.getElementById('modal-cliente').value;
-    const valor = parseFloat(document.getElementById('modal-valor').value) || 0, antecipacao = parseFloat(document.getElementById('modal-antecipacao').value) || 0, custo = parseFloat(document.getElementById('modal-custo').value) || 0;
-    if(!cliente || valor === 0) return alert("Preencha Nome e Valor!");
-
-    const choque = festas.find(f => f.data === data);
-    if(choque) {
-        if(!confirm(`⚠️ ATENÇÃO: Já existe uma festa agendada para este dia (${choque.cliente}). Deseja realmente agendar outra?`)) return;
+    if (festasDoDia.length > 0) {
+        festasDoDia.forEach(f => {
+            const indexReal = festas.indexOf(f);
+            container.innerHTML += `
+                <div style="background:#faf5ff; border:1px solid #d8b4fe; border-radius:6px; padding:0.6rem; margin-bottom:0.5rem; font-size:0.85rem; color:#333;">
+                    <strong>${f.cliente}</strong> (${f.horario || 'Livre'})<br>
+                    Status: <b>${f.status}</b> | Valor: ${formatarMoeda(f.valor)}<br>
+                    <button class="btn-editar" onclick="editarFesta(${indexReal}); fecharModalDia();" style="margin-top:4px; padding: 0.3rem 0.6rem;">✏️ Editar</button>
+                    <button class="btn-pdf" onclick="abrirDetalhesFesta(${indexReal}); fecharModalDia();" style="margin-top:4px; padding: 0.3rem 0.6rem;">📄 Relatório</button>
+                </div>`;
+        });
+    } else {
+        container.innerHTML = `<p style="font-size:0.85rem; color:#888;">Nenhuma festa neste dia.</p>`;
     }
 
-    festas.push({ cliente, data, endereco: 'A definir', valor, custo, antecipacao, status: (antecipacao >= valor && valor > 0) ? 'Pago' : 'Pendente', itens: [{nome: 'Reserva de Data', valor}], tarefas: [] });
-    salvarNovoCliente(cliente); localStorage.setItem('festasAgendadas', JSON.stringify(festas)); fecharModalAgendamento(); atualizarVisaoGeral();
+    document.getElementById('modal-dia-festas').style.display = 'flex';
+}
+function fecharModalDia() { document.getElementById('modal-dia-festas').style.display = 'none'; }
+
+function irParaVender() {
+    const dataSelecionada = document.getElementById('modal-data').value;
+    fecharModalDia();
+    mudarAba('aba-pedido', 'btn-tab-pedido');
+    document.getElementById('ped-data').value = dataSelecionada;
 }
 
-// Catálogo com Foto de Referência
+// ==========================================
+// 6. CATÁLOGO
+// ==========================================
 function atualizarInterfaceCatalogo() {
     const ulServicos = document.getElementById('lista-catalogo-servicos'); ulServicos.innerHTML = '';
     catalogoServicos.forEach((s, idx) => {
-        ulServicos.innerHTML += `
-            <li>
-                <div class="produto-info"><span class="produto-nome">${s.nome}</span><span class="badge-preco">${formatarMoeda(s.valor)}</span></div>
-                <button class="btn-icon-circular" onclick="removerServico(${idx})">🗑️</button>
-            </li>`;
+        ulServicos.innerHTML += `<li><div class="produto-info"><span class="produto-nome">${s.nome}</span><span class="badge-preco">${formatarMoeda(s.valor)}</span></div><button class="btn-remover" onclick="removerServico(${idx})">X</button></li>`;
     });
 
-    const selectCombo = document.getElementById('cat-combo-select-servico'); selectCombo.innerHTML = '<option value="">-- Escolher Serviço --</option>';
+    const selectCombo = document.getElementById('cat-combo-select-servico'); selectCombo.innerHTML = '<option value="">-- Serviço --</option>';
     catalogoServicos.forEach(s => { selectCombo.innerHTML += `<option value="${s.id}">${s.nome}</option>`; });
 
     const ulCombos = document.getElementById('lista-catalogo-combos'); ulCombos.innerHTML = '';
     catalogoCombos.forEach((c, idx) => {
-        ulCombos.innerHTML += `
-            <li>
-                <div class="produto-info">
-                    <span class="produto-nome">${c.nome}</span>
-                    <span class="badge-preco">${formatarMoeda(c.valorVenda)}</span>
-                    <span class="sub-itens">${c.itens.map(i => `${i.qtd}x ${i.nome}`).join(', ')}</span>
-                    ${c.foto ? `<a href="${c.foto}" target="_blank" style="font-size:0.75rem; color:#7c3aed;">🖼️ Ver Foto de Referência</a>` : ''}
-                </div>
-                <button class="btn-icon-circular" onclick="removerCombo(${idx})">🗑️</button>
-            </li>`;
+        ulCombos.innerHTML += `<li><div class="produto-info"><span class="produto-nome">${c.nome}</span><span class="badge-preco">${formatarMoeda(c.valorVenda)}</span></div><button class="btn-remover" onclick="removerCombo(${idx})">X</button></li>`;
     });
 
     const selectPedido = document.getElementById('ped-catalogo-select'); selectPedido.innerHTML = '<option value="">-- Buscar no Catálogo --</option>';
@@ -290,50 +416,43 @@ function atualizarInterfaceCatalogo() {
         selectPedido.innerHTML += '</optgroup>';
     }
 }
-
 function salvarServico() {
     const nome = document.getElementById('cat-serv-nome').value, valor = parseFloat(document.getElementById('cat-serv-valor').value);
-    if(!nome || isNaN(valor)) return alert('Preencha nome e valor!');
-    catalogoServicos.push({ id: Date.now().toString(), nome, valor }); localStorage.setItem('catalogoServicos', JSON.stringify(catalogoServicos));
+    if(!nome || isNaN(valor)) return;
+    catalogoServicos.push({ id: Date.now().toString(), nome, valor }); localStorage.setItem('serv_kenia_v1', JSON.stringify(catalogoServicos));
     document.getElementById('cat-serv-nome').value = ''; document.getElementById('cat-serv-valor').value = ''; atualizarInterfaceCatalogo();
 }
-function removerServico(idx) { catalogoServicos.splice(idx,1); localStorage.setItem('catalogoServicos', JSON.stringify(catalogoServicos)); atualizarInterfaceCatalogo(); }
+function removerServico(idx) { catalogoServicos.splice(idx,1); localStorage.setItem('serv_kenia_v1', JSON.stringify(catalogoServicos)); atualizarInterfaceCatalogo(); }
 
 function addServicoNoComboAtual() {
     const idServico = document.getElementById('cat-combo-select-servico').value, qtd = parseInt(document.getElementById('cat-combo-qtd').value);
-    if(!idServico || isNaN(qtd) || qtd < 1) return alert('Selecione um serviço!');
+    if(!idServico) return;
     const servico = catalogoServicos.find(s => s.id === idServico);
     comboTempItens.push({ idServico, nome: servico.nome, qtd, custoUn: servico.valor }); renderComboTemp();
 }
 function renderComboTemp() {
-    const ul = document.getElementById('lista-temp-combo'); ul.innerHTML = ''; let custoTotal = 0;
-    comboTempItens.forEach((item, idx) => {
-        custoTotal += (item.custoUn * item.qtd);
-        ul.innerHTML += `<li><span>${item.qtd}x ${item.nome}</span> <button class="btn-remover" onclick="comboTempItens.splice(${idx},1); renderComboTemp();">X</button></li>`;
-    });
-    document.getElementById('cat-combo-valor').placeholder = `Preço Sugerido: R$ ${custoTotal.toFixed(2)}`;
+    const ul = document.getElementById('lista-temp-combo'); ul.innerHTML = '';
+    comboTempItens.forEach((item, idx) => { ul.innerHTML += `<li><span>${item.qtd}x ${item.nome}</span></li>`; });
 }
 function salvarComboFinal() {
-    const nome = document.getElementById('cat-combo-nome').value;
-    const foto = document.getElementById('cat-combo-foto').value;
-    const valorVenda = parseFloat(document.getElementById('cat-combo-valor').value);
-    if(!nome || isNaN(valorVenda) || comboTempItens.length === 0) return alert('Preencha dados do combo!');
-    
-    catalogoCombos.push({ id: Date.now().toString(), nome, foto, valorVenda, itens: [...comboTempItens] });
-    localStorage.setItem('catalogoCombos', JSON.stringify(catalogoCombos));
-    document.getElementById('cat-combo-nome').value = ''; document.getElementById('cat-combo-foto').value = ''; document.getElementById('cat-combo-valor').value = ''; comboTempItens = []; renderComboTemp(); atualizarInterfaceCatalogo();
+    const nome = document.getElementById('cat-combo-nome').value, valorVenda = parseFloat(document.getElementById('cat-combo-valor').value);
+    if(!nome || isNaN(valorVenda)) return;
+    catalogoCombos.push({ id: Date.now().toString(), nome, valorVenda, itens: [...comboTempItens] });
+    localStorage.setItem('combos_kenia_v1', JSON.stringify(catalogoCombos));
+    document.getElementById('cat-combo-nome').value = ''; document.getElementById('cat-combo-valor').value = ''; comboTempItens = []; renderComboTemp(); atualizarInterfaceCatalogo();
 }
-function removerCombo(idx) { catalogoCombos.splice(idx,1); localStorage.setItem('catalogoCombos', JSON.stringify(catalogoCombos)); atualizarInterfaceCatalogo(); }
+function removerCombo(idx) { catalogoCombos.splice(idx,1); localStorage.setItem('combos_kenia_v1', JSON.stringify(catalogoCombos)); atualizarInterfaceCatalogo(); }
 
-// Vender com Frete Automático e Leads
+// ==========================================
+// 7. VENDER / EDITAR 
+// ==========================================
 function addAoPedido() {
     const selecao = document.getElementById('ped-catalogo-select').value; if(!selecao) return;
     const [tipo, id] = selecao.split('_');
-    if (tipo === 'serv') {
-        const serv = catalogoServicos.find(s => s.id === id); pedidoAtualItens.push({ nome: serv.nome, valor: serv.valor, sub: '' });
-    } else if (tipo === 'combo') {
-        const combo = catalogoCombos.find(c => c.id === id);
-        pedidoAtualItens.push({ nome: combo.nome, valor: combo.valorVenda, sub: combo.itens.map(i => `${i.qtd}x ${i.nome}`).join(', ') });
+    if (tipo === 'serv') { 
+        const serv = catalogoServicos.find(s => s.id === id); pedidoAtualItens.push({ nome: serv.nome, valor: serv.valor, sub: '' }); 
+    } else { 
+        const combo = catalogoCombos.find(c => c.id === id); pedidoAtualItens.push({ nome: combo.nome, valor: combo.valorVenda }); 
     }
     atualizarTelaPedido();
 }
@@ -342,20 +461,17 @@ function atualizarTelaPedido() {
     const ul = document.getElementById('lista-pedido-atual'); ul.innerHTML = ''; let subtotal = 0;
     pedidoAtualItens.forEach((item, idx) => {
         subtotal += item.valor;
-        ul.innerHTML += `
-            <li>
-                <div class="carrinho-info">
-                    <span class="carrinho-nome">${item.nome}</span>
-                    ${item.sub ? `<span class="sub-itens">${item.sub}</span>` : ''}
-                    <span class="carrinho-preco">${formatarMoeda(item.valor)}</span>
-                </div>
-                <button class="btn-icon-circular" onclick="pedidoAtualItens.splice(${idx},1); atualizarTelaPedido();">🗑️</button>
-            </li>`;
+        ul.innerHTML += `<li><div class="carrinho-info"><span class="carrinho-nome">${item.nome}</span><span class="carrinho-preco">${formatarMoeda(item.valor)}</span></div><button class="btn-remover" onclick="pedidoAtualItens.splice(${idx},1); atualizarTelaPedido();">X</button></li>`;
     });
 
     const frete = parseFloat(document.getElementById('ped-frete').value) || 0;
     const totalGeral = subtotal + frete;
     document.getElementById('ped-total-display').textContent = formatarMoeda(totalGeral);
+    
+    const inputAnt = document.getElementById('ped-antecipacao');
+    if (!inputAnt.value && totalGeral > 0 && editIndex === null) {
+        inputAnt.value = (totalGeral / 2).toFixed(2);
+    }
     calcularRestantePedido();
 }
 
@@ -364,75 +480,103 @@ function calcularRestantePedido() {
     const frete = parseFloat(document.getElementById('ped-frete').value) || 0;
     const totalGeral = subtotal + frete;
     const antecipacao = parseFloat(document.getElementById('ped-antecipacao').value) || 0;
+    
     let restante = totalGeral - antecipacao;
     if (restante < 0) restante = 0;
     document.getElementById('ped-restante-display').textContent = formatarMoeda(restante);
 }
 
-function salvarOrcamentoPendente() {
-    processarFechamentoPedido('Orçamento');
-}
-
 function fecharPedido() {
-    processarFechamentoPedido('Pendente');
-}
-
-function processarFechamentoPedido(statusInicial) {
-    const cliente = document.getElementById('ped-cliente').value, data = document.getElementById('ped-data').value, endereco = document.getElementById('ped-endereco').value;
-    const custoEstimado = parseFloat(document.getElementById('ped-custo').value) || 0, antecipacao = parseFloat(document.getElementById('ped-antecipacao').value) || 0;
+    const cliente = document.getElementById('ped-cliente').value;
+    const data = document.getElementById('ped-data').value;
+    const horario = document.getElementById('ped-horario').value;
+    const endereco = document.getElementById('ped-endereco').value;
+    const obs = document.getElementById('ped-obs').value;
     const frete = parseFloat(document.getElementById('ped-frete').value) || 0;
+    const antecipacao = parseFloat(document.getElementById('ped-antecipacao').value) || 0;
+    
+    let custoEstimado = gastosDetalhadosTemp.reduce((acc, item) => acc + item.total, 0);
 
     if(!cliente || !data || pedidoAtualItens.length === 0) return alert('Preencha Cliente, Data e adicione itens!');
 
-    const choque = festas.find(f => f.data === data);
-    if(choque && statusInicial !== 'Orçamento') {
-        if(!confirm(`⚠️ ATENÇÃO: Já existe uma festa agendada para este dia (${choque.cliente}). Deseja continuar?`)) return;
+    let faturamentoTotal = pedidoAtualItens.reduce((acc, item) => acc + item.valor, 0) + frete;
+    let itensFinais = [...pedidoAtualItens];
+    if(frete > 0) itensFinais.push({ nome: 'Deslocamento/Frete', valor: frete });
+
+    const statusFinal = (antecipacao >= faturamentoTotal && faturamentoTotal > 0) ? 'Pago' : 'Pendente';
+
+    const novaFesta = { 
+        cliente, data, horario, endereco, obs, 
+        valor: faturamentoTotal, custo: custoEstimado, antecipacao, 
+        status: statusFinal, 
+        itens: itensFinais, gastos: [...gastosDetalhadosTemp]
+    };
+
+    if(editIndex !== null) {
+        festas[editIndex] = novaFesta;
+        alert('💾 Pedido Atualizado com Sucesso!'); 
+    } else {
+        festas.push(novaFesta);
+        alert('✅ Novo Pedido Fechado!'); 
     }
-
-    let subtotal = pedidoAtualItens.reduce((acc, item) => acc + item.valor, 0);
-    let faturamentoTotal = subtotal + frete;
-    if(frete > 0) pedidoAtualItens.push({ nome: 'Taxa de Entrega / Frete', valor: frete, sub: '' });
-
-    let statusFinal = statusInicial;
-    if(statusInicial !== 'Orçamento' && antecipacao >= faturamentoTotal && faturamentoTotal > 0) {
-        statusFinal = 'Pago';
-    }
-
-    festas.push({ cliente, data, endereco, valor: faturamentoTotal, custo: custoEstimado, antecipacao, status: statusFinal, itens: [...pedidoAtualItens], tarefas: [] });
     
-    salvarNovoCliente(cliente); localStorage.setItem('festasAgendadas', JSON.stringify(festas));
+    localStorage.setItem('festas_kenia_v1', JSON.stringify(festas));
+    salvarNovoCliente(cliente);
     
-    document.getElementById('ped-cliente').value = ''; document.getElementById('ped-data').value = ''; document.getElementById('ped-endereco').value = '';
-    document.getElementById('ped-custo').value = ''; document.getElementById('ped-antecipacao').value = ''; document.getElementById('ped-frete').value = '';
-    pedidoAtualItens = []; atualizarTelaPedido();
-    
-    alert(statusFinal === 'Orçamento' ? '📋 Orçamento salvo com sucesso!' : '✅ Pedido Fechado com Sucesso!'); 
-    atualizarVisaoGeral(); mudarAba('aba-lista', 'btn-tab-lista');
+    limparFormularioVenda();
+    editIndex = null;
+    document.getElementById('titulo-vender').innerText = '🛒 Nova Venda / Fechar Pedido';
+    document.getElementById('btn-fechar-pedido').innerText = '💰 Salvar Pedido';
+
+    atualizarVisaoGeral(); renderizarHistorico(); mudarAba('aba-lista', 'btn-tab-lista');
+}
+
+function limparFormularioVenda() {
+    document.getElementById('ped-cliente').value = ''; document.getElementById('ped-data').value = ''; 
+    document.getElementById('ped-endereco').value = ''; document.getElementById('ped-obs').value = '';
+    document.getElementById('ped-antecipacao').value = ''; document.getElementById('ped-frete').value = '';
+    pedidoAtualItens = []; gastosDetalhadosTemp = []; renderizarGastosTemp(); atualizarTelaPedido();
 }
 
 function gerarWhatsApp() {
     const cliente = document.getElementById('ped-cliente').value || 'Cliente';
     if(pedidoAtualItens.length === 0) return alert('Adicione itens!');
-    let texto = `Olá, *${cliente}*! 🎉\nSeu orçamento detalhado:\n\n`;
+    let texto = `Olá, *${cliente}*! 🎉\nSeu pedido com *Kenia Silva_arte_festas*:\n\n`;
     let subtotal = 0;
-    pedidoAtualItens.forEach(i => { texto += `✅ *${i.nome}* - ${formatarMoeda(i.valor)}\n`; if (i.sub) texto += `   ↳ ${i.sub}\n`; subtotal += i.valor; });
+    pedidoAtualItens.forEach(i => { texto += `✅ *${i.nome}* - ${formatarMoeda(i.valor)}\n`; subtotal += i.valor; });
     const frete = parseFloat(document.getElementById('ped-frete').value) || 0;
     const total = subtotal + frete;
-    if(frete > 0) texto += `🚚 Frete/Entrega: ${formatarMoeda(frete)}\n`;
+    if(frete > 0) texto += `🚚 Deslocamento/Frete: ${formatarMoeda(frete)}\n`;
     const antecipacao = parseFloat(document.getElementById('ped-antecipacao').value) || 0;
     texto += `\n💰 *Total Geral: ${formatarMoeda(total)}*\n`;
     if(antecipacao > 0) { texto += `💳 Sinal: ${formatarMoeda(antecipacao)}\n`; texto += `⏳ Restante: ${formatarMoeda(total - antecipacao)}\n`; }
-    texto += `\nFico à disposição! ✨`;
-    navigator.clipboard.writeText(texto).then(() => alert('✅ Orçamento copiado para o WhatsApp!'));
+    navigator.clipboard.writeText(texto).then(() => alert('✅ Orçamento copiado!'));
 }
 
-function gerarPDF(index) {
-    const f = festas[index];
-    const itensHtml = (f.itens && f.itens.length > 0) ? f.itens.map(i => `<li style="margin-bottom:10px;padding:10px;background:#f9fafb;border-radius:4px;"><strong>${i.nome}</strong> - <span style="color:#6b21a8;">${formatarMoeda(i.valor)}</span>${i.sub ? `<br><small style="color:#666;">${i.sub}</small>` : ''}</li>`).join('') : `<li>Serviços combinados.</li>`;
-    const vSinal = Number(f.antecipacao || 0), vTotal = Number(f.valor || 0), restante = vTotal - vSinal;
-    const content = document.createElement('div');
-    content.innerHTML = `<div style="padding:40px;font-family:sans-serif;color:#333;"><h1 style="color:#6b21a8;text-align:center;margin-bottom:10px;">🎉 Festas PRO</h1><h3 style="text-align:center;color:#666;margin-top:0;">Confirmação de Pedido</h3><hr style="border:1px solid #e9d5ff;margin:20px 0;"><p><strong>Cliente:</strong> ${f.cliente}</p><p><strong>Data:</strong> ${formatarDataCompleta(f.data)}</p><p><strong>Local:</strong> ${f.endereco || 'A definir'}</p><h3 style="margin-top:30px;color:#4c1d95;border-bottom:1px solid #ddd;padding-bottom:5px;">Itens:</h3><ul style="list-style-type:none;padding-left:0;">${itensHtml}</ul><hr style="border:1px dashed #d8b4fe;margin:30px 0;"><div style="text-align:right;"><h2 style="color:#581c87;margin-bottom:5px;">Total: ${formatarMoeda(vTotal)}</h2>${vSinal > 0 ? `<p>Sinal Pago: <strong>${formatarMoeda(vSinal)}</strong></p>` : ''}${f.status !== 'Pago' ? `<p style="color:#ef4444;">Falta Pagar: <strong>${formatarMoeda(restante)}</strong></p>` : ''}<p>Status: <strong>${f.status}</strong></p></div><br><br><br><div style="text-align:center;"><p>___________________________________</p><p style="color:#666;">Assinatura</p></div></div>`;
-    html2pdf().set({ margin: 0, filename: `Pedido_${f.cliente.replace(/\s+/g, '_')}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } }).from(content).save();
+function exportarBackup() {
+    const dados = { festas, catalogoServicos, catalogoCombos, clientesSalvos };
+    const blob = new Blob([JSON.stringify(dados)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url;
+    a.download = `Backup_KeniaFestas_${new Date().toISOString().split('T')[0]}.json`;
+    a.click(); URL.revokeObjectURL(url);
 }
 
-atualizarListaClientes(); atualizarVisaoGeral(); atualizarInterfaceCatalogo();
+function importarBackup(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const dados = JSON.parse(e.target.result);
+            if(dados.festas) localStorage.setItem('festas_kenia_v1', JSON.stringify(dados.festas));
+            if(dados.catalogoServicos) localStorage.setItem('serv_kenia_v1', JSON.stringify(dados.catalogoServicos));
+            if(dados.catalogoCombos) localStorage.setItem('combos_kenia_v1', JSON.stringify(dados.catalogoCombos));
+            if(dados.clientesSalvos) localStorage.setItem('cli_kenia_v1', JSON.stringify(dados.clientesSalvos));
+            alert('✅ Backup Restaurado com Sucesso!'); location.reload();
+        } catch (error) { alert('❌ Erro no arquivo.'); }
+    };
+    reader.readAsText(file);
+}
+
+atualizarListaClientes(); atualizarVisaoGeral(); atualizarInterfaceCatalogo(); renderizarHistorico();

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#6b21a8">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <title>Festas PRO</title>
+
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Bibliotecas -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <header class="app-header">
+        <h1>🎉 Festas PRO</h1>
+        <button type="button" class="btn-tema" onclick="alternarTema()" title="Alternar Modo Escuro">🌙</button>
+    </header>
+
+    <datalist id="lista-clientes-salvos"></datalist>
+
+    <main id="conteudo-principal">
+        <!-- ================= aba 1: início ================= -->
+        <div id="aba-lista" class="conteudo-aba ativa">
+
+            <section class="resumo-financeiro">
+                <div class="saldo-principal">
+                    <p>Dinheiro em Caixa (Recebido)</p>
+                    <h2 id="total-recebido">R$ 0,00</h2>
+                </div>
+
+                <div class="detalhes-financeiros">
+                    <div class="detalhe-item pendente">
+                        <span>⏳ A Receber</span>
+                        <strong id="total-pendente">R$ 0,00</strong>
+                    </div>
+                    <div class="detalhe-item lucro">
+                        <span>💰 Lucro Líquido</span>
+                        <strong id="total-lucro">R$ 0,00</strong>
+                    </div>
+                    <div class="detalhe-item faturamento">
+                        <span>📊 Faturamento Total</span>
+                        <strong id="total-valor">R$ 0,00</strong>
+                    </div>
+                    <div class="detalhe-item custo">
+                        <span>📉 Custos Estimados</span>
+                        <strong id="total-custos">R$ 0,00</strong>
+                    </div>
+                </div>
+            </section>
+
+            <!-- NOVO: Filtro de Contas a Receber por Período -->
+            <section class="card">
+                <h2>🔍 Filtrar Contas a Receber</h2>
+                <div class="input-group">
+                    <select id="filtro-periodo" onchange="atualizarVisaoGeral()">
+                        <option value="todos">Mostrar Todas as Festas</option>
+                        <option value="semana">Vencimento Nesta Semana</option>
+                        <option value="mes">Vencimento Neste Mês</option>
+                    </select>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>📈 Desempenho Mensal</h2>
+                <div style="position: relative; height: 200px; width: 100%;">
+                    <canvas id="graficoDesempenho"></canvas>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Próximas Festas & Leads</h2>
+                <div class="table-container">
+                    <table id="tabela-festas">
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>Cliente</th>
+                                <th>Status</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="lista-festas"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="card" style="display: flex; gap: 0.5rem; justify-content: space-between;">
+                <button type="button" class="btn-pdf" onclick="exportarBackup()" style="flex: 1;">📥 Fazer Backup</button>
+                <button type="button" class="btn-sucesso" onclick="document.getElementById('file-import').click()" style="flex: 1;">📤 Restaurar</button>
+                <input type="file" id="file-import" style="display: none;" onchange="importarBackup(event)" accept=".json">
+            </section>
+        </div>
+
+        <!-- ================= aba 2: agenda ================= -->
+        <div id="aba-agenda" class="conteudo-aba">
+            <section class="card" style="padding-bottom: 0.5rem;">
+                <div class="calendario-header">
+                    <button type="button" onclick="mudarMes(-1)">&#10094;</button>
+                    <h3 id="mes-ano-display">Mês Ano</h3>
+                    <button type="button" onclick="mudarMes(1)">&#10095;</button>
+                </div>
+                <div class="calendario-grid" id="calendario-dias"></div>
+                <div style="margin-top: 15px; font-size: 0.8rem; text-align: center; opacity: 0.8;">
+                    <span style="display:inline-block; width: 12px; height: 12px; background: #8b5cf6; border-radius: 50%; margin-right: 5px; vertical-align: middle;"></span> Agendado
+                    <span style="display:inline-block; width: 12px; height: 12px; background: #10b981; border-radius: 50%; margin-right: 5px; margin-left: 10px; vertical-align: middle;"></span> Pago
+                    <span style="display:inline-block; width: 12px; height: 12px; background: #f59e0b; border-radius: 50%; margin-right: 5px; margin-left: 10px; vertical-align: middle;"></span> Orçamento Aberto
+                </div>
+            </section>
+        </div>
+
+        <!-- ================= aba 3: catálogo ================= -->
+        <div id="aba-catalogo" class="conteudo-aba">
+            <section class="card">
+                <h2>🔹 Novo Serviço</h2>
+                <div class="form-linha">
+                    <div class="input-group">
+                        <input type="text" id="cat-serv-nome" placeholder="Nome do Serviço (Ex: DJ)">
+                    </div>
+                    <div class="input-group" style="width: 120px;">
+                        <input type="number" id="cat-serv-valor" step="0.01" placeholder="R$ 0,00">
+                    </div>
+                </div>
+                <button type="button" onclick="salvarServico()" class="btn-adicionar">Adicionar Serviço</button>
+
+                <h3 class="titulo-sessao-catalogo">Meus Serviços Cadastrados</h3>
+                <ul id="lista-catalogo-servicos" class="lista-produtos"></ul>
+            </section>
+
+            <section class="card">
+                <h2>📦 Criar Novo Combo</h2>
+                <div class="input-group">
+                    <input type="text" id="cat-combo-nome" placeholder="Nome do Combo (Ex: Festa Completa)">
+                </div>
+                <!-- NOVO: Campo de Foto/Inspiração -->
+                <div class="input-group">
+                    <input type="text" id="cat-combo-foto" placeholder="Link da Foto / Referência do Tema (Opcional)">
+                </div>
+
+                <div class="caixa-montar-combo">
+                    <div class="input-group" style="margin-bottom: 0;">
+                        <select id="cat-combo-select-servico"></select>
+                    </div>
+                    <div class="form-linha" style="margin-top: 0.5rem; margin-bottom: 0;">
+                        <div class="input-group" style="flex: 1; margin-bottom: 0;">
+                            <input type="number" id="cat-combo-qtd" value="1" min="1" placeholder="Qtd">
+                        </div>
+                        <button type="button" onclick="addServicoNoComboAtual()" class="btn-secundario" style="flex: 2;">+ Incluir no Combo</button>
+                    </div>
+                </div>
+
+                <ul id="lista-temp-combo" class="lista-temp"></ul>
+
+                <div class="input-group" style="margin-top: 1rem;">
+                    <label>Preço de Venda do Combo (R$):</label>
+                    <input type="number" id="cat-combo-valor" step="0.01" placeholder="Ex: 800.00">
+                </div>
+                <button type="button" onclick="salvarComboFinal()" class="btn-rosa">Salvar Combo Pronto</button>
+
+                <h3 class="titulo-sessao-catalogo">Meus Combos Cadastrados</h3>
+                <ul id="lista-catalogo-combos" class="lista-produtos"></ul>
+            </section>
+        </div>
+
+        <!-- ================= aba 4: vender ================= -->
+        <div id="aba-pedido" class="conteudo-aba">
+            <section class="card card-vender">
+                <h2>👤 Dados do Cliente</h2>
+                <div class="input-group">
+                    <input type="text" id="ped-cliente" list="lista-clientes-salvos" placeholder="Nome do Cliente">
+                </div>
+                <div class="form-linha">
+                    <div class="input-group">
+                        <input type="date" id="ped-data">
+                    </div>
+                    <div class="input-group">
+                        <input type="text" id="ped-endereco" placeholder="Local do Evento">
+                    </div>
+                </div>
+            </section>
+
+            <section class="card card-vender">
+                <h2>🛒 Carrinho de Compras</h2>
+                <div class="caixa-montar-combo">
+                    <div class="form-linha" style="margin-bottom: 0;">
+                        <div class="input-group" style="flex: 2; margin-bottom: 0;">
+                            <select id="ped-catalogo-select"></select>
+                        </div>
+                        <button type="button" onclick="addAoPedido()" class="btn-adicionar" style="flex: 1;">Add</button>
+                    </div>
+                </div>
+
+                <ul id="lista-pedido-atual" class="lista-carrinho"></ul>
+
+                <!-- NOVO: Taxa de Entrega / Frete Automático -->
+                <div class="input-group" style="margin-top: 1rem;">
+                    <label>Taxa de Entrega / Frete (R$):</label>
+                    <input type="number" id="ped-frete" step="0.01" placeholder="0,00" oninput="atualizarTelaPedido()">
+                </div>
+
+                <div class="area-custos">
+                    <label>Despesas/Custos Estimados:</label>
+                    <input type="number" id="ped-custo" step="0.01" placeholder="R$ 0,00">
+                </div>
+            </section>
+
+            <section class="resumo-checkout">
+                <div class="linha-resumo">
+                    <span>Subtotal + Frete:</span>
+                    <strong id="ped-total-display">R$ 0,00</strong>
+                </div>
+                <div class="linha-resumo destaque-sinal">
+                    <span>Sinal / Adiantamento (R$):</span>
+                    <input type="number" id="ped-antecipacao" step="0.01" placeholder="0,00" oninput="calcularRestantePedido()">
+                </div>
+                <div class="linha-resumo total-final">
+                    <span>Falta Receber:</span>
+                    <strong id="ped-restante-display">R$ 0,00</strong>
+                </div>
+
+                <div class="botoes-acao-venda">
+                    <button type="button" onclick="gerarWhatsApp()" class="btn-whatsapp">📲 Enviar Orçamento</button>
+                    <button type="button" onclick="salvarOrcamentoPendente()" class="btn-check">📋 Salvar como Orçamento (Lead)</button>
+                    <button type="button" onclick="fecharPedido()" class="btn-sucesso">💰 Fechar Pedido (Confirmado)</button>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Modais -->
+    <div id="modal-agendamento" class="modal-overlay">
+        <div class="modal-content">
+            <h2 id="modal-data-titulo" style="color: #581c87; margin-bottom: 1rem; font-size: 1.2rem;">Agendar: </h2>
+            <input type="hidden" id="modal-data">
+            <div class="input-group">
+                <label>Nome do Cliente:</label>
+                <input type="text" id="modal-cliente" list="lista-clientes-salvos" placeholder="Nome">
+            </div>
+            <div class="input-group">
+                <label>Valor Total Cobrado (R$):</label>
+                <input type="number" id="modal-valor" step="0.01" placeholder="Ex: 800.00">
+            </div>
+            <div class="form-linha">
+                <div class="input-group">
+                    <label>Sinal Antecipado (R$):</label>
+                    <input type="number" id="modal-antecipacao" step="0.01" placeholder="0.00">
+                </div>
+                <div class="input-group">
+                    <label>Custos (R$):</label>
+                    <input type="number" id="modal-custo" step="0.01" placeholder="0.00">
+                </div>
+            </div>
+            <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                <button type="button" class="btn-remover" onclick="fecharModalAgendamento()" style="flex: 1;">Cancelar</button>
+                <button type="button" class="btn-sucesso" onclick="salvarAgendamentoRapido()" style="flex: 2;">Confirmar Reserva</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-checklist" class="modal-overlay">
+        <div class="modal-content" style="max-height: 80vh; overflow-y: auto;">
+            <h2 style="color: #581c87; margin-bottom: 1rem; font-size: 1.2rem;">📝 Checklist da Festa</h2>
+            <h3 id="checklist-cliente-nome" style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;"></h3>
+            <div class="form-linha">
+                <div class="input-group" style="flex: 3; margin-bottom: 0;">
+                    <input type="text" id="nova-tarefa-nome" placeholder="Ex: Encomendar bolo...">
+                </div>
+                <button type="button" class="btn-adicionar" onclick="adicionarTarefa()" style="flex: 1; padding: 0.5rem;">Add</button>
+            </div>
+            <ul id="lista-tarefas" class="lista-simples" style="margin-top: 1rem;"></ul>
+            <button type="button" class="btn-remover" onclick="fecharModalChecklist()" style="width: 100%; margin-top: 1rem;">Fechar Checklist</button>
+        </div>
+    </div>
+
+    <nav class="bottom-nav">
+        <button class="tab-btn ativo" id="btn-tab-lista" onclick="mudarAba('aba-lista', 'btn-tab-lista')">
+            <span class="icon">📊</span>
+            <span class="text">Início</span>
+        </button>
+        <button class="tab-btn" id="btn-tab-agenda" onclick="mudarAba('aba-agenda', 'btn-tab-agenda')">
+            <span class="icon">📅</span>
+            <span class="text">Agenda</span>
+        </button>
+        <button class="tab-btn" id="btn-tab-catalogo" onclick="mudarAba('aba-catalogo', 'btn-tab-catalogo')">
+            <span class="icon">🛍️</span>
+            <span class="text">Catálogo</span>
+        </button>
+        <button class="tab-btn" id="btn-tab-pedido" onclick="mudarAba('aba-pedido', 'btn-tab-pedido')">
+            <span class="icon">🛒</span>
+            <span class="text">Vender</span>
+        </button>
+    </nav>
+
+    <script src="script.js"></script>
+</body>
+</html>
